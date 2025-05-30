@@ -28,8 +28,8 @@ if __name__ == "__main__":
         logger = logging.getLogger('fallback_logger')
         logger.error("Не удалось инициализировать основной логгер, используется fallback")
     
-    # Инициализация ProcessManager
-    process_manager = ProcessManager(logger=logger)
+    # Инициализация ProcessManager с конфигурацией
+    process_manager = ProcessManager(logger=logger, config_manager=config_manager)
     
     # Создаем обработчик команд
     command_handler = create_command_handler(process_manager)
@@ -44,15 +44,10 @@ if __name__ == "__main__":
     
     try:
         logger.info("Запуск системы...")
-        # Автозапуск процессов из конфига
-        for process_name in config_manager.processes_names:
-            if config_manager.get_process_config(process_name) and config_manager.get_process_config(process_name)["enable"] == "true":
-                print(config_manager.get_process_config(process_name)["enable"])
-                process_manager.start_process(process_name)
-            else:
-                logger.info(f"Процесс: %s {process_name} не активирован")
+        # Автозапуск процессов из конфига (теперь это делается внутри ProcessManager)
+        process_manager.start_configured_processes()
         
-        logger.info("Текущие процессы: %s", process_manager.list_processes())
+        logger.info("Текущие процессы: %s", process_manager.list_all_processes_statuses())
         
         # Запуск сервера
         server.start()
