@@ -1,17 +1,39 @@
 import subprocess
 import os
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
+from main_process.cfg import ConfigManager
 
 class ProcessManager:
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, config_manager=None):
         self.processes: Dict[str, subprocess.Popen] = {}
         self.logger = logger or self._create_fallback_logger()
+        self.config_manager = config_manager
+        self.all_processes = self._get_all_configured_processes()
         
     def _create_fallback_logger(self):
         """Создает fallback логгер, если основной не передан"""
         import logging
         logging.basicConfig(level=logging.INFO)
         return logging.getLogger('ProcessManagerFallback')
+    
+    def _get_all_configured_processes(self) -> List[str]:
+        """Возвращает список всех процессов, указанных в конфигурации"""
+        if self.config_manager is None:
+            return []
+        return self.config_manager.processes_names
+    
+    def start_configured_processes(self) -> None:
+        """Запускает все процессы, у которых enable=true в конфигурации"""
+        if not self.all_processes:
+            self.logger.warning("В конфигурации не найдено ни одного процесса")
+            return
+            
+        for process_name in self.all_processes:
+            process_config = self.config_manager.get_process_config(process_name)
+            if process_config and process_config.get("enable", "false").lower() == "true":
+                self.start_process(process_name)
+            else:
+                self.logger.info(f"Процесс '{process_name}' отключен в конфигурации (enable=false)")
 
     def handle_command(self, command: str) -> Tuple[bool, str]:
         """
@@ -26,10 +48,12 @@ class ProcessManager:
         parts = command.strip().split()
         if not parts:
             return False, "Пустая команда"
-            
-        cmd = parts[0].lower()
-        args = parts[1:]
         
+        print("Parts: ", parts)
+        
+        cmd = parts[0].lower()
+        args = parts[1::]
+        print(args[0])
         try:
             if cmd == "start" and args:
                 return self._handle_start(args[0])
@@ -52,9 +76,16 @@ class ProcessManager:
 
     def _handle_start(self, process_name: str) -> Tuple[bool, str]:
         """Обработка команды start"""
+        if process_name not in self.all_processes:
+            return False, f"Процесс '{process_name}' не найден в конфигурации"
+            
         if process_name in self.processes:
             status = self.get_process_status(process_name)
             return False, f"Процесс '{process_name}' уже запущен (статус: {status})"
+            
+        # process_config = self.config_manager.get_process_config(process_name)
+        # if process_config and process_config.get("enable", "false").lower() != "true":
+        #     return False, f"Процесс '{process_name}' отключен в конфигурации (enable=false)"
             
         success = self.start_process(process_name)
         if success:
@@ -64,8 +95,11 @@ class ProcessManager:
 
     def _handle_stop(self, process_name: str) -> Tuple[bool, str]:
         """Обработка команды stop"""
+        if process_name not in self.all_processes:
+            return False, f"Процесс '{process_name}' не найден в конфигурации"
+            
         if process_name not in self.processes:
-            return False, f"Процесс '{process_name}' не найден"
+            return False, f"Процесс '{process_name}' не запущен"
             
         success = self.stop_process(process_name)
         if success:
@@ -75,19 +109,20 @@ class ProcessManager:
 
     def _handle_status(self, process_name: str) -> Tuple[bool, str]:
         """Обработка команды status для одного процесса"""
+        if process_name not in self.all_processes:
+            return False, f"Процесс '{process_name}' не найден в конфигурации"
+            
         status = self.get_process_status(process_name)
-        if status is None:
-            return False, f"Процесс '{process_name}' не найден"
         return True, f"Статус процесса '{process_name}': {status}"
 
     def _handle_status_all(self) -> Tuple[bool, str]:
         """Обработка команды status processes"""
-        processes = self.list_processes()
-        if not processes:
-            return True, "Нет запущенных процессов"
+        statuses = self.list_all_processes_statuses()
+        if not statuses:
+            return True, "Нет процессов в конфигурации"
             
-        status_lines = [f"{name}: {status}" for name, status in processes.items()]
-        return True, "Текущие процессы:\n" + "\n".join(status_lines)
+        status_lines = [f"{name}: {status}" for name, status in statuses.items()]
+        return True, "Статусы всех процессов:\n" + "\n".join(status_lines)
 
     def _handle_shutdown(self) -> Tuple[bool, str]:
         """Обработка команды shutdown"""
@@ -146,14 +181,29 @@ class ProcessManager:
         for name in list(self.processes.keys()):
             self.stop_process(name)
 
-    def get_process_status(self, name: str) -> Optional[str]:
-        """Возвращает статус процесса (Running, Stopped, или None, если не существует)."""
-        if name not in self.processes:
-            return None
+    def get_process_status(self, name: str) -> str:
+        """Возвращает статус процесса (Running, Stopped, None или Not Configured)."""
+        if name not in self.all_processes:
+            return "Not Configured"
             
+        if name not in self.processes:
+            process_config = self.config_manager.get_process_config(name)
+            if process_config and process_config.get("enable", "false").lower() == "true":
+                if os.path.exists(f"processes/{name}.py"):
+                    return "Stopped"
+                else:
+                    return "None"
+            else:
+                return "Diasbled"
+                
         process = self.processes[name]
         return "Running" if process.poll() is None else "Stopped"
 
     def list_processes(self) -> Dict[str, str]:
-        """Возвращает словарь всех процессов и их статусов."""
-        return {name: self.get_process_status(name) or "Not Found" for name in self.processes}
+        """Возвращает словарь запущенных процессов и их статусов."""
+        return {name: "Running" if process.poll() is None else "Stopped" 
+                for name, process in self.processes.items()}
+    
+    def list_all_processes_statuses(self) -> Dict[str, str]:
+        """Возвращает словарь всех процессов из конфигурации и их статусов."""
+        return {name: self.get_process_status(name) for name in self.all_processes}
