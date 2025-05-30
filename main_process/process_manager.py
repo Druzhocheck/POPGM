@@ -49,11 +49,9 @@ class ProcessManager:
         if not parts:
             return False, "Пустая команда"
         
-        print("Parts: ", parts)
-        
         cmd = parts[0].lower()
         args = parts[1::]
-        print(args[0])
+
         try:
             if cmd == "start" and args:
                 return self._handle_start(args[0])
