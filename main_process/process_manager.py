@@ -1,6 +1,7 @@
 import subprocess
 import os
-from typing import Dict, Optional, Tuple, List
+import shlex
+from typing import Dict, Optional, Tuple, List, Any
 from main_process.cfg import ConfigManager
 
 class ProcessManager:
@@ -40,30 +41,31 @@ class ProcessManager:
         Обрабатывает входящую команду и возвращает результат выполнения.
         
         Args:
-            command: строка команды (например "start adc", "stop fft", "status processes")
+            command: строка команды (например "start adc", "stop fft", "status processes",
+                     "start hello --message ONE --time 2 --file data.txt --directory ./processes")
             
         Returns:
             Кортеж (успех, сообщение)
         """
-        parts = command.strip().split()
-        if not parts:
-            return False, "Пустая команда"
-        
-        print("Parts: ", parts)
-        
-        cmd = parts[0].lower()
-        args = parts[1::]
-        print(args[0])
         try:
-            if cmd == "start" and args:
-                return self._handle_start(args[0])
-            elif cmd == "stop" and args:
-                return self._handle_stop(args[0])
+            parts = shlex.split(command.strip())
+            if not parts:
+                return False, "Пустая команда"
+            
+            cmd = parts[0].lower()
+            
+            if cmd == "start" and len(parts) > 1:
+                process_name = parts[1]
+                # Извлекаем пользовательские параметры (все что после имени процесса)
+                user_args = self._parse_user_args(parts[2:]) if len(parts) > 2 else {}
+                return self._handle_start(process_name, user_args)
+            elif cmd == "stop" and len(parts) > 1:
+                return self._handle_stop(parts[1])
             elif cmd == "status":
-                if args and args[0].lower() == "processes":
+                if len(parts) > 1 and parts[1].lower() == "processes":
                     return self._handle_status_all()
-                elif args:
-                    return self._handle_status(args[0])
+                elif len(parts) > 1:
+                    return self._handle_status(parts[1])
                 else:
                     return False, "Не указан процесс для статуса"
             elif cmd == "shutdown":
@@ -74,8 +76,26 @@ class ProcessManager:
             self.logger.error(f"Ошибка обработки команды '{command}': {e}", exc_info=True)
             return False, f"Ошибка выполнения команды: {str(e)}"
 
-    def _handle_start(self, process_name: str) -> Tuple[bool, str]:
-        """Обработка команды start"""
+    def _parse_user_args(self, args: List[str]) -> Dict[str, str]:
+        """Парсит пользовательские аргументы в формате --key value в словарь"""
+        user_args = {}
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg.startswith("--"):
+                key = arg[2:]
+                if i + 1 < len(args) and not args[i+1].startswith("--"):
+                    user_args[key] = args[i+1]
+                    i += 2
+                else:
+                    user_args[key] = ""  # Флаг без значения
+                    i += 1
+            else:
+                i += 1
+        return user_args
+
+    def _handle_start(self, process_name: str, user_args: Dict[str, str] = None) -> Tuple[bool, str]:
+        """Обработка команды start с пользовательскими параметрами"""
         if process_name not in self.all_processes:
             return False, f"Процесс '{process_name}' не найден в конфигурации"
             
@@ -83,11 +103,7 @@ class ProcessManager:
             status = self.get_process_status(process_name)
             return False, f"Процесс '{process_name}' уже запущен (статус: {status})"
             
-        # process_config = self.config_manager.get_process_config(process_name)
-        # if process_config and process_config.get("enable", "false").lower() != "true":
-        #     return False, f"Процесс '{process_name}' отключен в конфигурации (enable=false)"
-            
-        success = self.start_process(process_name)
+        success = self.start_process(process_name, user_args or {})
         if success:
             return True, f"Процесс '{process_name}' успешно запущен"
         else:
@@ -130,22 +146,46 @@ class ProcessManager:
         self.stop_all_processes()
         return True, f"Система выключена. Остановлено процессов: {count}"
 
-    def start_process(self, name: str) -> bool:
-        """Запускает процесс с заданным именем и командой."""
+    def start_process(self, name: str, user_args: Dict[str, str] = None) -> bool:
+        """
+        Запускает процесс с заданным именем, объединяя параметры из конфигурации
+        и пользовательские параметры (пользовательские имеют приоритет).
+        
+        Args:
+            name: имя процесса
+            user_args: словарь пользовательских параметров (например {'message': 'ONE', 'time': '2'})
+        """
         try:
-            command = ["python", f"processes/{name}.py"]
-            
-            if not os.path.exists(f"processes/{name}.py"):
-                self.logger.error(f"Файл процесса не найден: processes/{name}.py")
+            script_path = f"processes/{name}.py"
+            if not os.path.exists(script_path):
+                self.logger.error(f"Файл процесса не найден: {script_path}")
                 return False
                 
             if name in self.processes:
                 self.logger.warning(f"Попытка запуска уже запущенного процесса '{name}'")
                 return False
             
+            # Получаем конфигурацию процесса
+            process_config = self.config_manager.get_process_config(name) or {}
+            
+            # Удаляем параметр enable из конфигурации
+            process_config.pop('enable', None)
+            
+            # Объединяем параметры (пользовательские имеют приоритет)
+            combined_args = {**process_config, **(user_args or {})}
+            
+            # Формируем команду для запуска
+            command = ["python", script_path]
+            
+            # Добавляем параметры в командную строку
+            for param, value in combined_args.items():
+                command.extend([f"--{param}", str(value)])
+            
+            self.logger.debug(f"Запускаем процесс командой: {' '.join(command)}")
+            
             process = subprocess.Popen(command)
             self.processes[name] = process
-            self.logger.info(f"Процесс '{name}' запущен (PID: {process.pid})")
+            self.logger.info(f"Процесс '{name}' запущен (PID: {process.pid}) с параметрами: {combined_args}")
             return True
             
         except Exception as e:
@@ -194,7 +234,7 @@ class ProcessManager:
                 else:
                     return "None"
             else:
-                return "Diasbled"
+                return "Disabled"
                 
         process = self.processes[name]
         return "Running" if process.poll() is None else "Stopped"
