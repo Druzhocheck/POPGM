@@ -1,0 +1,7 @@
+2025-06-02 10:13:35 - INFO - Получено от ('192.168.47.1', 59938): start --message "NEW FILE"
+2025-06-02 10:13:46 - INFO - Получено от ('192.168.47.1', 62593): start hello -m "NEW FILE"
+2025-06-02 10:13:46 - INFO - Процесс 'hello' запущен (PID: 18786) с параметрами: {'directory': 'processes', 'file': 'data.txt', 'time': '5', 'message': 'Check'}
+2025-06-02 10:14:05 - INFO - Получено от ('192.168.47.1', 50556): stop hello
+2025-06-02 10:14:05 - INFO - Процесс 'hello' (PID: 18786) остановлен
+2025-06-02 10:14:14 - INFO - Получено от ('192.168.47.1', 61551): start hello --message "NEW FILE"
+2025-06-02 10:14:14 - INFO - Процесс 'hello' запущен (PID: 18848) с параметрами: {'directory': 'processes', 'file': 'data.txt', 'time': '5', 'message': 'NEW FILE'}
