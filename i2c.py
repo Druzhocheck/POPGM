@@ -2,7 +2,7 @@ import smbus
 import time
 import subprocess
 
-class ADAU1761Programmer:
+class ADAU1761:
     # Инициализация шины и адреса DSP
     def __init__(self, i2c_bus=5, i2c_address=0x38):
         self.bus = smbus.SMBus(i2c_bus)
@@ -158,7 +158,7 @@ class ADAU1761Programmer:
 if __name__ == "__main__":
     try:
         # print("Инициализация программирования ADAU1761...")
-        programmer = ADAU1761Programmer(i2c_bus=5, i2c_address=0x38)
+        programmer = ADAU1761(i2c_bus=5, i2c_address=0x38)
         print("Запуск процесса конфигурации...")
         programmer.default_download()
         print("ADAU1761 успешно сконфигурирован")
